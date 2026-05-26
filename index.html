@@ -157,6 +157,8 @@
     return AC;
   }
 
+  const FLOW_NOTES = [196, 220, 247, 294, 330, 392, 440, 494, 523, 587, 659];
+
   let lastTick = { x: 0, y: 0 }, lastTickT = 0;
   function maybeTick(x, y) {
     const dx = x - lastTick.x, dy = y - lastTick.y;
@@ -167,48 +169,35 @@
       const a = ac(), t = a.currentTime;
       if (t - lastTickT < 0.032) return;
       lastTickT = t;
-      // Granular stutter — 3 rapid micro noise bursts, randomized bandpass = pitch glitch
-      for (let i = 0; i < 3; i++) {
-        const d = i * 0.011;
-        const dur = 0.013;
-        const buf  = a.createBuffer(1, Math.floor(a.sampleRate * dur), a.sampleRate);
-        const data = buf.getChannelData(0);
-        for (let j = 0; j < data.length; j++) data[j] = (Math.random() * 2 - 1);
-        const src = a.createBufferSource(); src.buffer = buf;
-        const flt = a.createBiquadFilter(); flt.type = 'bandpass';
-        flt.frequency.value = 300 + Math.random() * 2200;
-        flt.Q.value = 4 + Math.random() * 8;
-        const vol = Math.min(0.018 + speed * 0.001, 0.048) * (1 - i * 0.28);
-        const g = a.createGain(); g.gain.value = vol;
-        src.connect(flt); flt.connect(g); g.connect(a.destination);
-        src.start(t + d);
-      }
+      // Soft sine through lowpass — X position picks note, flowing feel
+      const xFrac = Math.max(0, Math.min(1, mx / SZ));
+      const freq = FLOW_NOTES[Math.min(Math.floor(xFrac * FLOW_NOTES.length), FLOW_NOTES.length - 1)];
+      const o = a.createOscillator(), g = a.createGain();
+      o.type = 'sine'; o.frequency.value = freq;
+      const lpf = a.createBiquadFilter(); lpf.type = 'lowpass'; lpf.frequency.value = 1400;
+      o.connect(lpf); lpf.connect(g); g.connect(a.destination);
+      g.gain.setValueAtTime(0.001, t);
+      g.gain.linearRampToValueAtTime(0.038, t + 0.016);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.26);
+      o.start(t); o.stop(t + 0.27);
     } catch (_) {}
   }
 
   function playClick() {
     try {
       const a = ac(), t = a.currentTime;
-      // Tape glitch — 5 chaotic sawtooth bursts at random pitches, staggered
-      for (let i = 0; i < 5; i++) {
-        const d = i * 0.028;
-        const freq = 120 + Math.random() * 680;
+      // Flowing ascending run — C major two octaves, 38ms stagger
+      [262, 330, 392, 523, 659, 784, 1047].forEach((freq, i) => {
+        const d = i * 0.038;
         const o = a.createOscillator(), g = a.createGain();
-        o.connect(g); g.connect(a.destination);
-        o.type = 'sawtooth'; o.frequency.setValueAtTime(freq, t + d);
-        o.frequency.exponentialRampToValueAtTime(freq * (0.2 + Math.random() * 0.4), t + d + 0.12);
-        g.gain.setValueAtTime(0.055 - i * 0.008, t + d);
-        g.gain.exponentialRampToValueAtTime(0.001, t + d + 0.14);
-        o.start(t + d); o.stop(t + d + 0.15);
-      }
-      // Low rumble underneath
-      const o2 = a.createOscillator(), g2 = a.createGain();
-      o2.connect(g2); g2.connect(a.destination);
-      o2.type = 'sine'; o2.frequency.setValueAtTime(55, t);
-      o2.frequency.exponentialRampToValueAtTime(22, t + 0.35);
-      g2.gain.setValueAtTime(0.18, t);
-      g2.gain.exponentialRampToValueAtTime(0.001, t + 0.38);
-      o2.start(t); o2.stop(t + 0.39);
+        o.type = 'sine'; o.frequency.value = freq;
+        const lpf = a.createBiquadFilter(); lpf.type = 'lowpass'; lpf.frequency.value = 2200;
+        o.connect(lpf); lpf.connect(g); g.connect(a.destination);
+        g.gain.setValueAtTime(0.001, t + d);
+        g.gain.linearRampToValueAtTime(0.042 + i * 0.003, t + d + 0.016);
+        g.gain.exponentialRampToValueAtTime(0.001, t + d + 0.40);
+        o.start(t + d); o.stop(t + d + 0.41);
+      });
     } catch (_) {}
   }
 
