@@ -19,64 +19,28 @@
       width: var(--sz); height: var(--sz);
       border-radius: 10px; border: 1px solid rgba(255,255,255,0.06); display: block;
     }
-    #meta { display: flex; align-items: center; gap: 24px; }
-    #label { font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: rgba(255,255,255,0.2); }
+    #label {
+      font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase;
+      color: rgba(255,255,255,0.2);
+    }
   </style>
 </head>
 <body>
   <div id="wrap">
-    <canvas id="c"></canvas>
-    <div id="meta">
-      <span id="label">flow — move + click</span>
-    </div>
+    <canvas id="c" width="500" height="500"></canvas>
+    <span id="label">flow — move + click</span>
   </div>
 <script>
-  const SZ   = 422;
-  const COLS = 30, ROWS = 30;
-  const GAP  = SZ / COLS;
-  const LEN  = 8;
+  const SZ  = 500;
+  const GAP = SZ / 30;
 
   const canvas = document.getElementById('c');
-  canvas.width = canvas.height = SZ;
-  const ctx = canvas.getContext('2d');
-
-  const phases = new Float32Array(COLS * ROWS);
-  for (let i = 0; i < phases.length; i++) phases[i] = Math.random() * Math.PI * 2;
+  const ctx    = canvas.getContext('2d');
 
   let mx = SZ / 2, my = SZ / 2, isInside = false;
   const ripples = [];
 
-  // ── Flow particles ────────────────────────────────────────────
-  const flowPts = [];
-  const MAX_PTS = 150;
-  function spawnPt(x, y) {
-    if (flowPts.length >= MAX_PTS) return;
-    flowPts.push({ x: x + (Math.random()-0.5)*18, y: y + (Math.random()-0.5)*18, age: 0, life: 1.6 + Math.random()*1.2 });
-  }
-
-  canvas.addEventListener('mousemove', e => {
-    const r = canvas.getBoundingClientRect();
-    mx = (e.clientX - r.left) * (SZ / r.width);
-    my = (e.clientY - r.top)  * (SZ / r.height);
-    isInside = true;
-    maybeTick(e.clientX, e.clientY);
-    if (Math.random() < 0.4) spawnPt(mx, my);
-  });
-  canvas.addEventListener('mouseenter', () => isInside = true);
-  canvas.addEventListener('mouseleave', () => isInside = false);
-
-  canvas.addEventListener('pointerdown', e => {
-    const r = canvas.getBoundingClientRect();
-    const px = (e.clientX - r.left) * (SZ / r.width);
-    const py = (e.clientY - r.top)  * (SZ / r.height);
-    ripples.push({ x: px, y: py, born: performance.now() / 1000 });
-    if (ripples.length > 3) ripples.shift();
-    for (let i = 0; i < 22; i++) spawnPt(px, py);
-    playClick();
-  });
-
-  const VORTEX_R = 100;
-
+  // ── Field ─────────────────────────────────────────────────────────────────
   function baseAngle(nx, ny, t) {
     const px = nx * 0.55 + t * 0.38;
     const py = ny * 0.42 - t * 0.26;
@@ -86,6 +50,7 @@
     );
   }
 
+  const VORTEX_R = 110;
   function fieldAngle(x, y, t) {
     let angle = baseAngle(x / GAP - 0.5, y / GAP - 0.5, t);
     if (isInside) {
@@ -109,6 +74,44 @@
     return angle;
   }
 
+  // ── Background streamers ──────────────────────────────────────────────────
+  const N_STREAMERS = 200;
+  const TRAIL_LEN   = 42;
+  const STREAM_SPD  = 60;
+
+  function mkStreamer() {
+    return { x: Math.random() * SZ, y: Math.random() * SZ, trail: [] };
+  }
+  const streamers = Array.from({ length: N_STREAMERS }, mkStreamer);
+
+  function updateStreamers(t, dt) {
+    for (const s of streamers) {
+      s.trail.push({ x: s.x, y: s.y });
+      if (s.trail.length > TRAIL_LEN) s.trail.shift();
+      const a = fieldAngle(s.x, s.y, t);
+      s.x += Math.cos(a) * STREAM_SPD * dt;
+      s.y += Math.sin(a) * STREAM_SPD * dt;
+      if (s.x < -12 || s.x > SZ + 12 || s.y < -12 || s.y > SZ + 12) {
+        s.x = Math.random() * SZ;
+        s.y = Math.random() * SZ;
+        s.trail = [];
+      }
+    }
+  }
+
+  // ── Cursor flow particles ─────────────────────────────────────────────────
+  const flowPts = [];
+  const MAX_PTS = 80;
+  function spawnPt(x, y) {
+    if (flowPts.length >= MAX_PTS) return;
+    flowPts.push({
+      x: x + (Math.random()-0.5)*18,
+      y: y + (Math.random()-0.5)*18,
+      age: 0,
+      life: 1.6 + Math.random() * 1.2
+    });
+  }
+
   function updateParticles(t, dt) {
     for (let i = flowPts.length - 1; i >= 0; i--) {
       const p = flowPts[i];
@@ -122,52 +125,77 @@
     }
   }
 
+  // ── Events ────────────────────────────────────────────────────────────────
+  canvas.addEventListener('mousemove', e => {
+    const r = canvas.getBoundingClientRect();
+    mx = (e.clientX - r.left) * (SZ / r.width);
+    my = (e.clientY - r.top)  * (SZ / r.height);
+    isInside = true;
+    if (Math.random() < 0.4) spawnPt(mx, my);
+  });
+  canvas.addEventListener('mouseenter', () => { isInside = true; });
+  canvas.addEventListener('mouseleave', () => { isInside = false; });
+
+  canvas.addEventListener('pointerdown', e => {
+    const r  = canvas.getBoundingClientRect();
+    const px = (e.clientX - r.left) * (SZ / r.width);
+    const py = (e.clientY - r.top)  * (SZ / r.height);
+    ripples.push({ x: px, y: py, born: performance.now() / 1000 });
+    if (ripples.length > 3) ripples.shift();
+    for (let i = 0; i < 22; i++) spawnPt(px, py);
+    playClick();
+  });
+
+  // ── Audio ─────────────────────────────────────────────────────────────────
+  let clickAudio = null;
+  function initAudio() {
+    if (clickAudio) return;
+    clickAudio = new Audio('./sounds/selection.mp3');
+    clickAudio.volume = 0.42;
+  }
+  function playClick() {
+    initAudio();
+    clickAudio.currentTime = 0;
+    clickAudio.play().catch(() => {});
+  }
+
+  // ── Draw ──────────────────────────────────────────────────────────────────
   function draw(t) {
+    ctx.globalCompositeOperation = 'source-over';
     ctx.fillStyle = '#000';
-    ctx.fillRect(0, 0, SZ, SZ);
+    ctx.beginPath();
+    ctx.roundRect(0, 0, SZ, SZ, 10);
+    ctx.fill();
 
-    for (let r = 0; r < ROWS; r++) {
-      for (let c = 0; c < COLS; c++) {
-        const x = (c + 0.5) * GAP;
-        const y = (r + 0.5) * GAP;
-        const angle = fieldAngle(x, y, t);
+    ctx.globalCompositeOperation = 'screen';
 
-        const phase = phases[r * COLS + c];
-        const shimmer = 0.5 + 0.5 * Math.sin(phase + t * 2.8 - (c * 0.18 + r * 0.14));
-        let alpha = 0.1 + shimmer * 0.25;
-        if (isInside) {
-          const dx = x - mx, dy = y - my;
-          alpha += Math.max(0, 1 - Math.sqrt(dx*dx+dy*dy) / VORTEX_R) * 0.45;
-        }
-
-        const cos = Math.cos(angle), sin = Math.sin(angle);
-        const x0 = x - cos * LEN / 2, y0 = y - sin * LEN / 2;
-        const x1 = x + cos * LEN / 2, y1 = y + sin * LEN / 2;
-
-        ctx.beginPath();
-        ctx.moveTo(x0, y0);
-        ctx.lineTo(x1, y1);
-        ctx.strokeStyle = `rgba(255,255,255,${(alpha * 0.5).toFixed(3)})`;
-        ctx.lineWidth = 0.9;
-        ctx.lineCap = 'round';
-        ctx.stroke();
-
-        ctx.beginPath();
-        ctx.arc(x1, y1, 1.1, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(255,255,255,${alpha.toFixed(3)})`;
-        ctx.fill();
-      }
+    // Streamers — single path per streamer, screen blend stacks brightness at convergence zones
+    ctx.lineWidth = 0.9;
+    ctx.lineCap   = 'round';
+    for (const s of streamers) {
+      if (s.trail.length < 2) continue;
+      ctx.beginPath();
+      ctx.moveTo(s.trail[0].x, s.trail[0].y);
+      for (let i = 1; i < s.trail.length; i++) ctx.lineTo(s.trail[i].x, s.trail[i].y);
+      ctx.strokeStyle = 'rgba(255,255,255,0.052)';
+      ctx.stroke();
+      // Head dot
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, 1.0, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255,255,255,0.22)';
+      ctx.fill();
     }
 
-    // Flow particles
+    // Cursor flow particles (brighter — spawn cluster traces the field from click point)
     flowPts.forEach(p => {
       const life = 1 - p.age / p.life;
       ctx.beginPath();
-      ctx.arc(p.x, p.y, 1.3, 0, Math.PI * 2);
-      ctx.fillStyle = `rgba(255,255,255,${(life * life * 0.52).toFixed(3)})`;
+      ctx.arc(p.x, p.y, 1.4, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(255,255,255,${(life * life * 0.62).toFixed(3)})`;
       ctx.fill();
     });
 
+    // Cursor dot
     if (isInside) {
       ctx.beginPath();
       ctx.arc(mx, my, 2.5, 0, Math.PI * 2);
@@ -176,42 +204,13 @@
     }
   }
 
-  // ── Audio ─────────────────────────────────────────────────────
-  let hoverAudio = null, clickAudio = null;
-  function initAudio() {
-    if (hoverAudio) return;
-    hoverAudio = new Audio('./sounds/selection.mp3');
-    hoverAudio.volume = 0.06;
-    clickAudio = new Audio('./sounds/selection.mp3');
-    clickAudio.volume = 0.42;
-  }
-  function playHover() {
-    initAudio();
-    hoverAudio.currentTime = 0;
-    hoverAudio.play().catch(() => {});
-  }
-  function playClick() {
-    initAudio();
-    clickAudio.currentTime = 0;
-    clickAudio.play().catch(() => {});
-  }
-
-  let lastTick = { x: 0, y: 0 }, lastTickMs = 0;
-  function maybeTick(x, y) {
-    const dx = x - lastTick.x, dy = y - lastTick.y;
-    if (dx * dx + dy * dy < 48 * 48) return;
-    const now = performance.now();
-    if (now - lastTickMs < 220) return;
-    lastTick = { x, y }; lastTickMs = now;
-    playHover();
-  }
-
   const t0 = performance.now();
   let lastT = 0;
   (function loop() {
-    const t = (performance.now() - t0) / 1000;
+    const t  = (performance.now() - t0) / 1000;
     const dt = Math.min(t - lastT, 0.05);
     lastT = t;
+    updateStreamers(t, dt);
     updateParticles(t, dt);
     draw(t);
     requestAnimationFrame(loop);
