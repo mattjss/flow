@@ -50,7 +50,7 @@
     );
   }
 
-  const VORTEX_R = 110;
+  const VORTEX_R = 120;
   function fieldAngle(x, y, t) {
     let angle = baseAngle(x / GAP - 0.5, y / GAP - 0.5, t);
     if (isInside) {
@@ -59,39 +59,46 @@
       if (dist < VORTEX_R) {
         const blend = 1 - dist / VORTEX_R;
         const va = Math.atan2(dx, -dy);
-        angle += Math.atan2(Math.sin(va - angle), Math.cos(va - angle)) * blend * 0.7;
+        angle += Math.atan2(Math.sin(va - angle), Math.cos(va - angle)) * blend * 0.85;
       }
     }
     ripples.forEach(rip => {
       const age = t - rip.born;
-      if (age > 2.5) return;
+      if (age > 3.0) return;
       const dx = x - rip.x, dy = y - rip.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
-      const ring = Math.abs(dist - age * 160);
-      const amt = Math.exp(-ring * ring / (2 * 22 * 22)) * Math.exp(-age * 1.2) * 1.4;
+      const ring = Math.abs(dist - age * 155);
+      const amt = Math.exp(-ring * ring / (2 * 26 * 26)) * Math.exp(-age * 0.9) * 1.8;
       angle += amt * Math.atan2(dy, dx);
     });
     return angle;
   }
 
   // ── Background streamers ──────────────────────────────────────────────────
-  const N_STREAMERS = 200;
-  const TRAIL_LEN   = 42;
-  const STREAM_SPD  = 60;
+  // Two layers: fast thin + slow thick for depth
+  const N_FAST = 200, N_SLOW = 80;
+  const TRAIL_FAST = 44, TRAIL_SLOW = 30;
 
-  function mkStreamer() {
-    return { x: Math.random() * SZ, y: Math.random() * SZ, trail: [] };
+  function mkStreamer(speedMul) {
+    return {
+      x: Math.random() * SZ,
+      y: Math.random() * SZ,
+      trail: [],
+      speed: (52 + Math.random() * 22) * speedMul,
+      hueOffset: Math.random() * 360
+    };
   }
-  const streamers = Array.from({ length: N_STREAMERS }, mkStreamer);
+  const fastStreamers = Array.from({ length: N_FAST }, () => mkStreamer(1.0));
+  const slowStreamers = Array.from({ length: N_SLOW }, () => mkStreamer(0.38));
 
-  function updateStreamers(t, dt) {
+  function updateLayer(streamers, trailLen, t, dt) {
     for (const s of streamers) {
-      s.trail.push({ x: s.x, y: s.y });
-      if (s.trail.length > TRAIL_LEN) s.trail.shift();
-      const a = fieldAngle(s.x, s.y, t);
-      s.x += Math.cos(a) * STREAM_SPD * dt;
-      s.y += Math.sin(a) * STREAM_SPD * dt;
-      if (s.x < -12 || s.x > SZ + 12 || s.y < -12 || s.y > SZ + 12) {
+      s.trail.push({ x: s.x, y: s.y, a: fieldAngle(s.x, s.y, t) });
+      if (s.trail.length > trailLen) s.trail.shift();
+      const a = s.trail[s.trail.length - 1].a;
+      s.x += Math.cos(a) * s.speed * dt;
+      s.y += Math.sin(a) * s.speed * dt;
+      if (s.x < -14 || s.x > SZ + 14 || s.y < -14 || s.y > SZ + 14) {
         s.x = Math.random() * SZ;
         s.y = Math.random() * SZ;
         s.trail = [];
@@ -99,16 +106,16 @@
     }
   }
 
-  // ── Cursor flow particles ─────────────────────────────────────────────────
+  // ── Cursor burst particles ────────────────────────────────────────────────
   const flowPts = [];
-  const MAX_PTS = 80;
+  const MAX_PTS = 90;
   function spawnPt(x, y) {
     if (flowPts.length >= MAX_PTS) return;
     flowPts.push({
-      x: x + (Math.random()-0.5)*18,
-      y: y + (Math.random()-0.5)*18,
+      x: x + (Math.random()-0.5)*20,
+      y: y + (Math.random()-0.5)*20,
       age: 0,
-      life: 1.6 + Math.random() * 1.2
+      life: 1.8 + Math.random() * 1.4
     });
   }
 
@@ -120,8 +127,8 @@
         flowPts.splice(i, 1); continue;
       }
       const a = fieldAngle(p.x, p.y, t);
-      p.x += Math.cos(a) * 42 * dt;
-      p.y += Math.sin(a) * 42 * dt;
+      p.x += Math.cos(a) * 48 * dt;
+      p.y += Math.sin(a) * 48 * dt;
     }
   }
 
@@ -131,7 +138,7 @@
     mx = (e.clientX - r.left) * (SZ / r.width);
     my = (e.clientY - r.top)  * (SZ / r.height);
     isInside = true;
-    if (Math.random() < 0.4) spawnPt(mx, my);
+    if (Math.random() < 0.35) spawnPt(mx, my);
   });
   canvas.addEventListener('mouseenter', () => { isInside = true; });
   canvas.addEventListener('mouseleave', () => { isInside = false; });
@@ -141,8 +148,8 @@
     const px = (e.clientX - r.left) * (SZ / r.width);
     const py = (e.clientY - r.top)  * (SZ / r.height);
     ripples.push({ x: px, y: py, born: performance.now() / 1000 });
-    if (ripples.length > 3) ripples.shift();
-    for (let i = 0; i < 22; i++) spawnPt(px, py);
+    if (ripples.length > 4) ripples.shift();
+    for (let i = 0; i < 28; i++) spawnPt(px, py);
     playClick();
   });
 
@@ -160,6 +167,44 @@
   }
 
   // ── Draw ──────────────────────────────────────────────────────────────────
+  // Angle → subtle hue: full rotation maps to color wheel, kept very desaturated
+  function angleToColor(angle, alpha) {
+    const hue = ((angle / (Math.PI * 2)) * 360 + 360) % 360;
+    return `hsla(${hue.toFixed(0)},38%,72%,${alpha.toFixed(3)})`;
+  }
+
+  function drawLayer(streamers, baseAlpha, lineW) {
+    ctx.lineWidth = lineW;
+    ctx.lineCap   = 'round';
+    for (const s of streamers) {
+      if (s.trail.length < 2) continue;
+      const headAngle = s.trail[s.trail.length - 1].a;
+      ctx.beginPath();
+      ctx.moveTo(s.trail[0].x, s.trail[0].y);
+      for (let i = 1; i < s.trail.length; i++) ctx.lineTo(s.trail[i].x, s.trail[i].y);
+      ctx.strokeStyle = angleToColor(headAngle, baseAlpha);
+      ctx.stroke();
+      // Head dot
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, lineW * 0.95, 0, Math.PI * 2);
+      ctx.fillStyle = angleToColor(headAngle, baseAlpha * 4.5);
+      ctx.fill();
+    }
+  }
+
+  // Soft vortex glow ring around cursor
+  function drawVortexGlow() {
+    if (!isInside) return;
+    const grad = ctx.createRadialGradient(mx, my, VORTEX_R * 0.3, mx, my, VORTEX_R);
+    grad.addColorStop(0,   'rgba(255,255,255,0.04)');
+    grad.addColorStop(0.6, 'rgba(255,255,255,0.02)');
+    grad.addColorStop(1,   'rgba(255,255,255,0)');
+    ctx.beginPath();
+    ctx.arc(mx, my, VORTEX_R, 0, Math.PI * 2);
+    ctx.fillStyle = grad;
+    ctx.fill();
+  }
+
   function draw(t) {
     ctx.globalCompositeOperation = 'source-over';
     ctx.fillStyle = '#000';
@@ -169,29 +214,21 @@
 
     ctx.globalCompositeOperation = 'screen';
 
-    // Streamers — single path per streamer, screen blend stacks brightness at convergence zones
-    ctx.lineWidth = 0.9;
-    ctx.lineCap   = 'round';
-    for (const s of streamers) {
-      if (s.trail.length < 2) continue;
-      ctx.beginPath();
-      ctx.moveTo(s.trail[0].x, s.trail[0].y);
-      for (let i = 1; i < s.trail.length; i++) ctx.lineTo(s.trail[i].x, s.trail[i].y);
-      ctx.strokeStyle = 'rgba(255,255,255,0.052)';
-      ctx.stroke();
-      // Head dot
-      ctx.beginPath();
-      ctx.arc(s.x, s.y, 1.0, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(255,255,255,0.22)';
-      ctx.fill();
-    }
+    // Slow background layer — thicker, dimmer, gives depth
+    drawLayer(slowStreamers, 0.038, 1.6);
 
-    // Cursor flow particles (brighter — spawn cluster traces the field from click point)
+    // Fast foreground layer — thin, slightly brighter
+    drawLayer(fastStreamers, 0.048, 0.85);
+
+    // Vortex ambient glow
+    drawVortexGlow();
+
+    // Burst particles from cursor/click
     flowPts.forEach(p => {
       const life = 1 - p.age / p.life;
       ctx.beginPath();
-      ctx.arc(p.x, p.y, 1.4, 0, Math.PI * 2);
-      ctx.fillStyle = `rgba(255,255,255,${(life * life * 0.62).toFixed(3)})`;
+      ctx.arc(p.x, p.y, 1.5, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(255,255,255,${(life * life * 0.65).toFixed(3)})`;
       ctx.fill();
     });
 
@@ -199,7 +236,7 @@
     if (isInside) {
       ctx.beginPath();
       ctx.arc(mx, my, 2.5, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(255,255,255,0.5)';
+      ctx.fillStyle = 'rgba(255,255,255,0.55)';
       ctx.fill();
     }
   }
@@ -210,7 +247,8 @@
     const t  = (performance.now() - t0) / 1000;
     const dt = Math.min(t - lastT, 0.05);
     lastT = t;
-    updateStreamers(t, dt);
+    updateLayer(fastStreamers, TRAIL_FAST, t, dt);
+    updateLayer(slowStreamers, TRAIL_SLOW, t, dt);
     updateParticles(t, dt);
     draw(t);
     requestAnimationFrame(loop);
