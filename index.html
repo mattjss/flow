@@ -165,42 +165,50 @@
     lastTick = { x, y };
     try {
       const a = ac(), t = a.currentTime;
-      if (t - lastTickT < 0.036) return;
+      if (t - lastTickT < 0.032) return;
       lastTickT = t;
-      const dur  = 0.065;
-      const buf  = a.createBuffer(1, Math.floor(a.sampleRate * dur), a.sampleRate);
-      const data = buf.getChannelData(0);
-      for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (data.length * 0.6));
-      const src = a.createBufferSource(); src.buffer = buf;
-      const flt = a.createBiquadFilter();
-      flt.type = 'bandpass';
-      flt.frequency.value = 700 + Math.min(speed * 18, 1800);
-      flt.Q.value = 1.4;
-      const vol = Math.min(0.025 + speed * 0.0016, 0.072);
-      const g   = a.createGain(); g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + dur);
-      src.connect(flt); flt.connect(g); g.connect(a.destination); src.start(t);
+      // Granular stutter — 3 rapid micro noise bursts, randomized bandpass = pitch glitch
+      for (let i = 0; i < 3; i++) {
+        const d = i * 0.011;
+        const dur = 0.013;
+        const buf  = a.createBuffer(1, Math.floor(a.sampleRate * dur), a.sampleRate);
+        const data = buf.getChannelData(0);
+        for (let j = 0; j < data.length; j++) data[j] = (Math.random() * 2 - 1);
+        const src = a.createBufferSource(); src.buffer = buf;
+        const flt = a.createBiquadFilter(); flt.type = 'bandpass';
+        flt.frequency.value = 300 + Math.random() * 2200;
+        flt.Q.value = 4 + Math.random() * 8;
+        const vol = Math.min(0.018 + speed * 0.001, 0.048) * (1 - i * 0.28);
+        const g = a.createGain(); g.gain.value = vol;
+        src.connect(flt); flt.connect(g); g.connect(a.destination);
+        src.start(t + d);
+      }
     } catch (_) {}
   }
 
   function playClick() {
     try {
       const a = ac(), t = a.currentTime;
-      [440, 447].forEach(freq => {
+      // Tape glitch — 5 chaotic sawtooth bursts at random pitches, staggered
+      for (let i = 0; i < 5; i++) {
+        const d = i * 0.028;
+        const freq = 120 + Math.random() * 680;
         const o = a.createOscillator(), g = a.createGain();
         o.connect(g); g.connect(a.destination);
-        o.type = 'sine'; o.frequency.setValueAtTime(freq, t);
-        o.frequency.exponentialRampToValueAtTime(freq * 0.2, t + 0.55);
-        g.gain.setValueAtTime(0.12, t);
-        g.gain.exponentialRampToValueAtTime(0.001, t + 0.58);
-        o.start(t); o.stop(t + 0.59);
-      });
-      const buf  = a.createBuffer(1, Math.floor(a.sampleRate * 0.12), a.sampleRate);
-      const data = buf.getChannelData(0);
-      for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (data.length * 0.35));
-      const src = a.createBufferSource(); src.buffer = buf;
-      const flt = a.createBiquadFilter(); flt.type = 'bandpass'; flt.frequency.value = 2400; flt.Q.value = 0.8;
-      const g2  = a.createGain(); g2.gain.setValueAtTime(0.14, t); g2.gain.exponentialRampToValueAtTime(0.001, t + 0.14);
-      src.connect(flt); flt.connect(g2); g2.connect(a.destination); src.start(t);
+        o.type = 'sawtooth'; o.frequency.setValueAtTime(freq, t + d);
+        o.frequency.exponentialRampToValueAtTime(freq * (0.2 + Math.random() * 0.4), t + d + 0.12);
+        g.gain.setValueAtTime(0.055 - i * 0.008, t + d);
+        g.gain.exponentialRampToValueAtTime(0.001, t + d + 0.14);
+        o.start(t + d); o.stop(t + d + 0.15);
+      }
+      // Low rumble underneath
+      const o2 = a.createOscillator(), g2 = a.createGain();
+      o2.connect(g2); g2.connect(a.destination);
+      o2.type = 'sine'; o2.frequency.setValueAtTime(55, t);
+      o2.frequency.exponentialRampToValueAtTime(22, t + 0.35);
+      g2.gain.setValueAtTime(0.18, t);
+      g2.gain.exponentialRampToValueAtTime(0.001, t + 0.38);
+      o2.start(t); o2.stop(t + 0.39);
     } catch (_) {}
   }
 
