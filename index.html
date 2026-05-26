@@ -31,125 +31,95 @@
     <span id="label">flow — move + click</span>
   </div>
 <script>
-  const SZ  = 500;
-  const GAP = SZ / 30;
-
   const canvas = document.getElementById('c');
   const ctx    = canvas.getContext('2d');
+  const W = 500, H = 500;
 
-  let mx = SZ / 2, my = SZ / 2, isInside = false;
-  const ripples = [];
+  // ── Grid ──────────────────────────────────────────────────────────────────
+  const COLS = 48, ROWS = 48;
+  const GAP  = W / COLS;
 
-  // ── Field ─────────────────────────────────────────────────────────────────
-  function baseAngle(nx, ny, t) {
-    const px = nx * 0.55 + t * 0.38;
-    const py = ny * 0.42 - t * 0.26;
-    return Math.atan2(
-      Math.sin(px) + Math.sin(py + 1.1),
-      Math.cos(py) + Math.cos(px - 0.9)
-    );
-  }
-
-  const VORTEX_R = 120;
-  function fieldAngle(x, y, t) {
-    let angle = baseAngle(x / GAP - 0.5, y / GAP - 0.5, t);
-    if (isInside) {
-      const dx = x - mx, dy = y - my;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      if (dist < VORTEX_R) {
-        const blend = 1 - dist / VORTEX_R;
-        const va = Math.atan2(dx, -dy);
-        angle += Math.atan2(Math.sin(va - angle), Math.cos(va - angle)) * blend * 0.85;
-      }
+  // Pre-build dot positions with tiny random offsets so it feels organic, not rigid
+  const dots = [];
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      dots.push({
+        x: (c + 0.5) * GAP + (Math.random() - 0.5) * 1.4,
+        y: (r + 0.5) * GAP + (Math.random() - 0.5) * 1.4,
+      });
     }
-    ripples.forEach(rip => {
-      const age = t - rip.born;
-      if (age > 3.0) return;
-      const dx = x - rip.x, dy = y - rip.y;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      const ring = Math.abs(dist - age * 155);
-      const amt = Math.exp(-ring * ring / (2 * 26 * 26)) * Math.exp(-age * 0.9) * 1.8;
-      angle += amt * Math.atan2(dy, dx);
-    });
-    return angle;
   }
 
-  // ── Background streamers ──────────────────────────────────────────────────
-  // Two layers: fast thin + slow thick for depth
-  const N_FAST = 200, N_SLOW = 80;
-  const TRAIL_FAST = 44, TRAIL_SLOW = 30;
+  // ── Wave sources ──────────────────────────────────────────────────────────
+  // Two persistent sources orbit the canvas in slow ellipses
+  const AMBIENT = [
+    { ox: W * 0.50, oy: H * 0.44, rx: W * 0.28, ry: H * 0.22, speed: 0.19, phase: 0,           omega: 1.55 },
+    { ox: W * 0.50, oy: H * 0.56, rx: W * 0.26, ry: H * 0.20, speed: 0.15, phase: Math.PI,      omega: 1.82 },
+  ];
 
-  function mkStreamer(speedMul) {
+  function ambientPos(src, t) {
     return {
-      x: Math.random() * SZ,
-      y: Math.random() * SZ,
-      trail: [],
-      speed: (52 + Math.random() * 22) * speedMul,
-      hueOffset: Math.random() * 360
+      x: src.ox + Math.cos(src.phase + t * src.speed) * src.rx,
+      y: src.oy + Math.sin(src.phase + t * src.speed) * src.ry,
     };
   }
-  const fastStreamers = Array.from({ length: N_FAST }, () => mkStreamer(1.0));
-  const slowStreamers = Array.from({ length: N_SLOW }, () => mkStreamer(0.38));
 
-  function updateLayer(streamers, trailLen, t, dt) {
-    for (const s of streamers) {
-      s.trail.push({ x: s.x, y: s.y, a: fieldAngle(s.x, s.y, t) });
-      if (s.trail.length > trailLen) s.trail.shift();
-      const a = s.trail[s.trail.length - 1].a;
-      s.x += Math.cos(a) * s.speed * dt;
-      s.y += Math.sin(a) * s.speed * dt;
-      if (s.x < -14 || s.x > SZ + 14 || s.y < -14 || s.y > SZ + 14) {
-        s.x = Math.random() * SZ;
-        s.y = Math.random() * SZ;
-        s.trail = [];
-      }
+  // Burst sources added on click, decay over time
+  const bursts = [];
+
+  let mx = -9999, my = -9999, isInside = false;
+
+  // ── Wave function ─────────────────────────────────────────────────────────
+  const K = 0.044; // wavenumber → wavelength ≈ 143px (~3.5 rings visible)
+
+  function waveAt(px, py, t) {
+    let h = 0;
+
+    // Ambient sources
+    for (const src of AMBIENT) {
+      const p = ambientPos(src, t);
+      const d = Math.sqrt((px - p.x) ** 2 + (py - p.y) ** 2);
+      h += Math.sin(K * d - src.omega * t);
     }
-  }
 
-  // ── Cursor burst particles ────────────────────────────────────────────────
-  const flowPts = [];
-  const MAX_PTS = 90;
-  function spawnPt(x, y) {
-    if (flowPts.length >= MAX_PTS) return;
-    flowPts.push({
-      x: x + (Math.random()-0.5)*20,
-      y: y + (Math.random()-0.5)*20,
-      age: 0,
-      life: 1.8 + Math.random() * 1.4
-    });
-  }
-
-  function updateParticles(t, dt) {
-    for (let i = flowPts.length - 1; i >= 0; i--) {
-      const p = flowPts[i];
-      p.age += dt;
-      if (p.age >= p.life || p.x < 0 || p.x > SZ || p.y < 0 || p.y > SZ) {
-        flowPts.splice(i, 1); continue;
-      }
-      const a = fieldAngle(p.x, p.y, t);
-      p.x += Math.cos(a) * 48 * dt;
-      p.y += Math.sin(a) * 48 * dt;
+    // Cursor source (stronger — lets the user's position dominate)
+    if (isInside) {
+      const d = Math.sqrt((px - mx) ** 2 + (py - my) ** 2);
+      h += 2.2 * Math.sin(K * d - 2.0 * t);
     }
+
+    // Burst sources
+    for (const b of bursts) {
+      const age = t - b.born;
+      const amp = 3.0 * Math.exp(-age * 1.3);
+      if (amp < 0.04) continue;
+      const d = Math.sqrt((px - b.x) ** 2 + (py - b.y) ** 2);
+      h += amp * Math.sin(K * d - 2.8 * t);
+    }
+
+    return h;
   }
+
+  // ── Visual ring flash ─────────────────────────────────────────────────────
+  const clickRings = [];
 
   // ── Events ────────────────────────────────────────────────────────────────
   canvas.addEventListener('mousemove', e => {
     const r = canvas.getBoundingClientRect();
-    mx = (e.clientX - r.left) * (SZ / r.width);
-    my = (e.clientY - r.top)  * (SZ / r.height);
+    mx = (e.clientX - r.left) * (W / r.width);
+    my = (e.clientY - r.top)  * (H / r.height);
     isInside = true;
-    if (Math.random() < 0.35) spawnPt(mx, my);
   });
-  canvas.addEventListener('mouseenter', () => { isInside = true; });
-  canvas.addEventListener('mouseleave', () => { isInside = false; });
+  canvas.addEventListener('mouseleave', () => { isInside = false; mx = -9999; my = -9999; });
 
   canvas.addEventListener('pointerdown', e => {
     const r  = canvas.getBoundingClientRect();
-    const px = (e.clientX - r.left) * (SZ / r.width);
-    const py = (e.clientY - r.top)  * (SZ / r.height);
-    ripples.push({ x: px, y: py, born: performance.now() / 1000 });
-    if (ripples.length > 4) ripples.shift();
-    for (let i = 0; i < 28; i++) spawnPt(px, py);
+    const cx = (e.clientX - r.left) * (W / r.width);
+    const cy = (e.clientY - r.top)  * (H / r.height);
+    const now = performance.now() / 1000;
+    bursts.push({ x: cx, y: cy, born: now });
+    clickRings.push({ x: cx, y: cy, r: 0, born: 0 });
+    if (bursts.length > 4) bursts.shift();
     playClick();
   });
 
@@ -160,99 +130,97 @@
     clickAudio = new Audio('./sounds/selection.mp3');
     clickAudio.volume = 0.42;
   }
-  function playClick() {
-    initAudio();
-    clickAudio.currentTime = 0;
-    clickAudio.play().catch(() => {});
-  }
+  function playClick() { initAudio(); clickAudio.currentTime = 0; clickAudio.play().catch(()=>{}); }
 
   // ── Draw ──────────────────────────────────────────────────────────────────
-  // Angle → subtle hue: full rotation maps to color wheel, kept very desaturated
-  function angleToColor(angle, alpha) {
-    const hue = ((angle / (Math.PI * 2)) * 360 + 360) % 360;
-    return `hsla(${hue.toFixed(0)},38%,72%,${alpha.toFixed(3)})`;
-  }
-
-  function drawLayer(streamers, baseAlpha, lineW) {
-    ctx.lineWidth = lineW;
-    ctx.lineCap   = 'round';
-    for (const s of streamers) {
-      if (s.trail.length < 2) continue;
-      const headAngle = s.trail[s.trail.length - 1].a;
-      ctx.beginPath();
-      ctx.moveTo(s.trail[0].x, s.trail[0].y);
-      for (let i = 1; i < s.trail.length; i++) ctx.lineTo(s.trail[i].x, s.trail[i].y);
-      ctx.strokeStyle = angleToColor(headAngle, baseAlpha);
-      ctx.stroke();
-      // Head dot
-      ctx.beginPath();
-      ctx.arc(s.x, s.y, lineW * 0.95, 0, Math.PI * 2);
-      ctx.fillStyle = angleToColor(headAngle, baseAlpha * 4.5);
-      ctx.fill();
+  // How many active sources for normalisation
+  function numSources(t) {
+    let n = AMBIENT.length;
+    if (isInside) n += 2.2; // cursor counts as stronger source
+    for (const b of bursts) {
+      const age = t - b.born;
+      const amp = 3.0 * Math.exp(-age * 1.3);
+      if (amp > 0.04) n += amp;
     }
+    return Math.max(1, n);
   }
 
-  // Soft vortex glow ring around cursor
-  function drawVortexGlow() {
-    if (!isInside) return;
-    const grad = ctx.createRadialGradient(mx, my, VORTEX_R * 0.3, mx, my, VORTEX_R);
-    grad.addColorStop(0,   'rgba(255,255,255,0.04)');
-    grad.addColorStop(0.6, 'rgba(255,255,255,0.02)');
-    grad.addColorStop(1,   'rgba(255,255,255,0)');
-    ctx.beginPath();
-    ctx.arc(mx, my, VORTEX_R, 0, Math.PI * 2);
-    ctx.fillStyle = grad;
-    ctx.fill();
-  }
+  const t0 = performance.now();
+  let   dt_last = 0;
 
-  function draw(t) {
+  function draw(now) {
+    const t  = (now - t0) / 1000;
+    const dt = Math.min(t - dt_last, 0.05);
+    dt_last  = t;
+
+    // Age / remove bursts
+    for (let i = bursts.length - 1; i >= 0; i--) {
+      const age = t - bursts[i].born;
+      if (3.0 * Math.exp(-age * 1.3) < 0.04) bursts.splice(i, 1);
+    }
+    for (let i = clickRings.length - 1; i >= 0; i--) {
+      clickRings[i].born += dt;
+      clickRings[i].r    += 272 * dt;
+      if (clickRings[i].r > W * 1.5) clickRings.splice(i, 1);
+    }
+
     ctx.globalCompositeOperation = 'source-over';
     ctx.fillStyle = '#000';
-    ctx.beginPath();
-    ctx.roundRect(0, 0, SZ, SZ, 10);
-    ctx.fill();
+    ctx.beginPath(); ctx.roundRect(0, 0, W, H, 10); ctx.fill();
 
     ctx.globalCompositeOperation = 'screen';
 
-    // Slow background layer — thicker, dimmer, gives depth
-    drawLayer(slowStreamers, 0.038, 1.6);
-
-    // Fast foreground layer — thin, slightly brighter
-    drawLayer(fastStreamers, 0.048, 0.85);
-
-    // Vortex ambient glow
-    drawVortexGlow();
-
-    // Burst particles from cursor/click
-    flowPts.forEach(p => {
-      const life = 1 - p.age / p.life;
+    // Click rings
+    clickRings.forEach(rg => {
+      const a = Math.max(0, 0.44 * (1 - rg.born * 1.4));
       ctx.beginPath();
-      ctx.arc(p.x, p.y, 1.5, 0, Math.PI * 2);
-      ctx.fillStyle = `rgba(255,255,255,${(life * life * 0.65).toFixed(3)})`;
-      ctx.fill();
+      ctx.arc(rg.x, rg.y, rg.r, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(255,255,255,${a.toFixed(3)})`;
+      ctx.lineWidth = 1.3;
+      ctx.stroke();
     });
 
+    const ns = numSources(t);
+
+    // Dots
+    for (const d of dots) {
+      const h = waveAt(d.x, d.y, t);
+
+      // Map height to visual: only crests are bright, troughs are near-invisible
+      // Normalize by source count so brightness stays consistent regardless of how many sources
+      const norm = h / ns; // in [-1, 1] roughly
+      const v    = Math.max(0, norm); // 0 to ~1
+
+      if (v < 0.04) continue; // skip near-zero dots — big perf win
+
+      const brightness = v;
+      const radius     = 0.9 + brightness * 2.2;
+      const alpha      = 0.12 + brightness * 0.78;
+
+      if (brightness > 0.55) {
+        ctx.shadowBlur  = brightness * 12;
+        ctx.shadowColor = `rgba(255,255,255,${(brightness * 0.5).toFixed(3)})`;
+      }
+
+      ctx.beginPath();
+      ctx.arc(d.x, d.y, radius, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(255,255,255,${Math.min(1, alpha).toFixed(3)})`;
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+
     // Cursor dot
-    if (isInside) {
+    if (isInside && mx > 0) {
       ctx.beginPath();
       ctx.arc(mx, my, 2.5, 0, Math.PI * 2);
       ctx.fillStyle = 'rgba(255,255,255,0.55)';
       ctx.fill();
     }
+
+    requestAnimationFrame(draw);
   }
 
-  const t0 = performance.now();
-  let lastT = 0;
-  (function loop() {
-    const t  = (performance.now() - t0) / 1000;
-    const dt = Math.min(t - lastT, 0.05);
-    lastT = t;
-    updateLayer(fastStreamers, TRAIL_FAST, t, dt);
-    updateLayer(slowStreamers, TRAIL_SLOW, t, dt);
-    updateParticles(t, dt);
-    draw(t);
-    requestAnimationFrame(loop);
-  })();
+  requestAnimationFrame(draw);
 </script>
 </body>
 </html>
