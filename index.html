@@ -150,60 +150,33 @@
   }
 
   // ── Audio ─────────────────────────────────────────────────────
-  let AC;
-  function ac() {
-    if (!AC) AC = new (window.AudioContext || window.webkitAudioContext)();
-    if (AC.state === 'suspended') AC.resume();
-    return AC;
+  let hoverAudio = null, clickAudio = null;
+  function initAudio() {
+    if (hoverAudio) return;
+    hoverAudio = new Audio('./sounds/hover.mp3');
+    hoverAudio.volume = 0.25;
+    clickAudio = new Audio('./sounds/selection.mp3');
+    clickAudio.volume = 0.42;
+  }
+  function playHover() {
+    initAudio();
+    hoverAudio.currentTime = 0;
+    hoverAudio.play().catch(() => {});
+  }
+  function playClick() {
+    initAudio();
+    clickAudio.currentTime = 0;
+    clickAudio.play().catch(() => {});
   }
 
-  // G major — bright, open, Nintendo movement feel
-  const FLOW_NOTES = [196, 220, 247, 294, 330, 392, 440, 494, 523, 587, 659];
-
-  let lastTick = { x: 0, y: 0 }, lastTickT = 0;
+  let lastTick = { x: 0, y: 0 }, lastTickMs = 0;
   function maybeTick(x, y) {
     const dx = x - lastTick.x, dy = y - lastTick.y;
-    const speed = Math.sqrt(dx * dx + dy * dy);
-    if (speed < 18) return;
-    lastTick = { x, y };
-    try {
-      const a = ac(), t = a.currentTime;
-      if (t - lastTickT < 0.032) return;
-      lastTickT = t;
-      // Square wave — X position picks note
-      const xFrac = Math.max(0, Math.min(1, mx / SZ));
-      const freq = FLOW_NOTES[Math.min(Math.floor(xFrac * FLOW_NOTES.length), FLOW_NOTES.length - 1)];
-      const o = a.createOscillator(), g = a.createGain();
-      o.type = 'square'; o.frequency.value = freq;
-      o.connect(g); g.connect(a.destination);
-      g.gain.setValueAtTime(0.030, t);
-      g.gain.exponentialRampToValueAtTime(0.001, t + 0.048);
-      o.start(t); o.stop(t + 0.052);
-    } catch (_) {}
-  }
-
-  function playClick() {
-    try {
-      const a = ac(), t = a.currentTime;
-      // Noise burst
-      const buf = a.createBuffer(1, Math.floor(a.sampleRate * 0.13), a.sampleRate);
-      const data = buf.getChannelData(0);
-      for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (data.length * 0.28));
-      const src = a.createBufferSource(); src.buffer = buf;
-      const flt = a.createBiquadFilter(); flt.type = 'lowpass'; flt.frequency.value = 1000;
-      const gn = a.createGain(); gn.gain.setValueAtTime(0.17, t); gn.gain.exponentialRampToValueAtTime(0.001, t + 0.16);
-      src.connect(flt); flt.connect(gn); gn.connect(a.destination); src.start(t);
-      // G major ascending run — 32ms stagger
-      [196, 294, 392, 523, 659, 784, 1047].forEach((freq, i) => {
-        const d = 0.05 + i * 0.032;
-        const o = a.createOscillator(), g = a.createGain();
-        o.type = 'square'; o.frequency.value = freq;
-        o.connect(g); g.connect(a.destination);
-        g.gain.setValueAtTime(0.036, t + d);
-        g.gain.exponentialRampToValueAtTime(0.001, t + d + 0.065);
-        o.start(t + d); o.stop(t + d + 0.07);
-      });
-    } catch (_) {}
+    if (dx * dx + dy * dy < 22 * 22) return;
+    const now = performance.now();
+    if (now - lastTickMs < 140) return;
+    lastTick = { x, y }; lastTickMs = now;
+    playHover();
   }
 
   const t0 = performance.now();
